@@ -46,8 +46,9 @@ func (m *MmapFile) Truncate(maxSz int64) error {
 	if err := m.Sync(); err != nil {
 		return fmt.Errorf("while sync file: %s, error: %v\n", m.Fd.Name(), err)
 	}
+	size := int64(len(m.Data))
 	resize := m.Fd.Truncate
-	if maxSz > int64(len(m.Data)) {
+	if maxSz > size {
 		resize = func(sz int64) error { return allocate(m.Fd, sz) }
 	}
 	if err := resize(maxSz); err != nil {
@@ -56,5 +57,9 @@ func (m *MmapFile) Truncate(maxSz int64) error {
 
 	var err error
 	m.Data, err = mremap(m.Data, int(maxSz)) // Mmap up to max size.
+	if err != nil && maxSz > size {
+		// The mapping did not grow. Truncating the file back frees the blocks allocated above.
+		err = errors.Join(err, m.Fd.Truncate(size))
+	}
 	return err
 }

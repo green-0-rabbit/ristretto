@@ -44,6 +44,10 @@ func OpenMmapFileUsing(fd *os.File, sz int, writable bool) (*MmapFile, error) {
 	// fmt.Printf("Mmaping file: %s with writable: %v filesize: %d\n", fd.Name(), writable, fileSize)
 	buf, err := Mmap(fd, writable, fileSize) // Mmap up to file size.
 	if err != nil {
+		if rerr == NewFile {
+			// The file was empty. Truncating it frees the blocks allocated above.
+			err = errors.Join(err, fd.Truncate(0))
+		}
 		return nil, errors.Join(err, fmt.Errorf("while mmapping %s with size: %d", fd.Name(), fileSize))
 	}
 

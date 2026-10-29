@@ -47,6 +47,37 @@ func TestOpenMmapFileAllocatesBlocks(t *testing.T) {
 	requireAllocated(t, mf.Fd, 4<<20)
 }
 
+// When a new file cannot be mapped, OpenMmapFile frees the blocks that it allocated.
+func TestOpenMmapFileFreesBlocksWhenMmapFails(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "file")
+	// A file that is open for writing only cannot be mapped.
+	_, err := OpenMmapFile(path, os.O_WRONLY|os.O_CREATE, 1<<20)
+	require.ErrorIs(t, err, unix.EACCES)
+	fi, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Zero(t, fi.Size())
+}
+
+// When the mapping cannot grow, Truncate frees the blocks that it allocated.
+func TestTruncateFreesBlocksWhenMremapFails(t *testing.T) {
+	page := os.Getpagesize()
+	mf, err := OpenMmapFile(filepath.Join(t.TempDir(), "file"), os.O_RDWR|os.O_CREATE, 2*page)
+	require.ErrorIs(t, err, NewFile)
+	data := mf.Data
+	defer func() {
+		// A failed mremap sets Data to nil and leaves the two pages mapped.
+		mf.Data = data
+		require.NoError(t, mf.Close(-1))
+	}()
+
+	// mremap cannot resize a range that mprotect has split into two mappings.
+	require.NoError(t, unix.Mprotect(data[page:], unix.PROT_READ))
+	require.ErrorIs(t, mf.Truncate(4<<20), unix.EFAULT)
+	fi, err := mf.Fd.Stat()
+	require.NoError(t, err)
+	require.Equal(t, int64(2*page), fi.Size())
+}
+
 // mountTmpfs mounts a tmpfs of size bytes on a new directory. It needs root with CAP_SYS_ADMIN,
 // and skips the test without them.
 func mountTmpfs(t *testing.T, size int) string {
