@@ -33,8 +33,8 @@ func OpenMmapFileUsing(fd *os.File, sz int, writable bool) (*MmapFile, error) {
 	var rerr error
 	fileSize := fi.Size()
 	if sz > 0 && fileSize == 0 {
-		// If file is empty, truncate it to sz.
-		if err := fd.Truncate(int64(sz)); err != nil {
+		// If file is empty, allocate sz bytes to it.
+		if err := allocate(fd, int64(sz)); err != nil {
 			return nil, errors.Join(err, errors.New("error while truncation"))
 		}
 		fileSize = int64(sz)
@@ -60,9 +60,9 @@ func OpenMmapFileUsing(fd *os.File, sz int, writable bool) (*MmapFile, error) {
 }
 
 // OpenMmapFile opens an existing file or creates a new file. If the file is
-// created, it would truncate the file to maxSz. In both cases, it would mmap
+// created, it would allocate maxSz bytes to the file. In both cases, it would mmap
 // the file to maxSz and returned it. In case the file is created, z.NewFile is
-// returned.
+// returned. On any other error, the file is closed.
 func OpenMmapFile(filename string, flag int, maxSz int) (*MmapFile, error) {
 	// fmt.Printf("opening file %s with flag: %v\n", filename, flag)
 	fd, err := os.OpenFile(filename, flag, 0666)
@@ -73,7 +73,11 @@ func OpenMmapFile(filename string, flag int, maxSz int) (*MmapFile, error) {
 	if flag == os.O_RDONLY {
 		writable = false
 	}
-	return OpenMmapFileUsing(fd, maxSz, writable)
+	mf, err := OpenMmapFileUsing(fd, maxSz, writable)
+	if err != nil && err != NewFile {
+		_ = fd.Close()
+	}
+	return mf, err
 }
 
 type mmapReader struct {
